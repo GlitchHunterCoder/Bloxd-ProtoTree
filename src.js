@@ -20,14 +20,14 @@ class Realm {
     this.global = global;
     this.travel = travel;
 
-  const handler = Object.fromEntries(
-    Realm.TRAPS.map(op => [
-      op,
-      (target, ...args) =>
-        this.travel[op]?.({ target, args, node: this.global, realm: this })
-        ?? Reflect[op](target, ...args)
-    ])
-  );
+    const handler = Object.fromEntries(
+      Realm.TRAPS.map(op => [
+        op,
+        (target, ...args) =>
+          this.travel[op]?.({ target, args, node: this.global, realm: this })
+          ?? Reflect[op](target, ...args)
+      ])
+    );
 
     Object.setPrototypeOf(globalThis, new Proxy(Object.create(null), handler));
   }
