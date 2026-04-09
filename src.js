@@ -14,22 +14,47 @@ class Realm {
     'apply',
     'construct',
   ];
-
-  constructor({ scopes={}, global={}, travel=()=>void 0 }={}) {
+    
+  constructor({ scopes={}, tree={}, travel={} }={}) {
     this.scopes = scopes;
-    this.global = global;
+    this.tree = tree;
     this.travel = travel;
-
-    const handler = Object.fromEntries(
+    this.origin = false
+    
+    let handler = Object.fromEntries(
       Realm.TRAPS.map(op => [
         op,
-        (target, ...args) =>
-          this.travel[op]?.({ target, args, node: this.global, realm: this })
-          ?? Reflect[op](target, ...args)
+        (...args) => {
+          this.origin = true
+          let error;
+          try{return Reflect[op](...args)}
+          catch(err){error = err}
+          finally{this.origin = false}
+          throw error
+        }
       ])
-    );
+    ); //first handler, avoid proxy
 
-    Object.setPrototypeOf(globalThis, new Proxy(Object.create(null), handler));
+    Object.defineProperty(globalThis, 'global', {
+      value: new Proxy(globalThis,handler),
+      writable: true,
+      configurable: true,
+    }); //set global
+
+    const _proto = Object.getPrototypeOf(globalThis);
+  
+    handler = Object.fromEntries(
+      Realm.TRAPS.map(op => [
+        op,
+        (target, ...args) =>{
+          if (this.origin) return Reflect[op](target, ...args);
+          return ((this.travel[op]?.({ target, args, node: this.tree, realm: this }))
+          ?? Reflect[op](target, ...args))
+        }
+      ])
+    ); //second handler, proxy handler
+    
+    Object.setPrototypeOf(globalThis, new Proxy(_proto, handler)); //set global prototype
   }
 
   container(name) {
