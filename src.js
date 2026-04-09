@@ -15,7 +15,7 @@ class Realm {
     'construct',
   ];
 
-  constructor({ scopes, global, travel }) {
+  constructor({ scopes={}, global={}, travel=()=>void 0 }={}) {
     this.scopes = scopes;
     this.global = global;
     this.travel = travel;
