@@ -14,47 +14,36 @@ class Realm {
     'apply',
     'construct',
   ];
-    
+
   constructor({ scopes={}, tree={}, travel={} }={}) {
     this.scopes = scopes;
     this.tree = tree;
     this.travel = travel;
-    this.origin = false
-    
-    let handler = Object.fromEntries(
-      Realm.TRAPS.map(op => [
-        op,
-        (...args) => {
-          this.origin = true
-          let error;
-          try{return Reflect[op](...args)}
-          catch(err){error = err}
-          finally{this.origin = false}
-          throw error
-        }
-      ])
-    ); //first handler, avoid proxy
+    this.origin = false;
 
+    const bypass = Object.fromEntries(
+      Realm.TRAPS.map(op => [op, (...args) => {
+        this.origin = true;
+        try { return Reflect[op](...args); }
+        finally { this.origin = false; }
+      }])
+    );
+
+    // global — unproxied window into globalThis
     Object.defineProperty(globalThis, 'global', {
-      value: new Proxy(globalThis,handler),
-      writable: true,
-      configurable: true,
-    }); //set global
+      value: new Proxy(globalThis, bypass),
+      writable: true, configurable: true,
+    });
 
-    const _proto = Object.getPrototypeOf(globalThis);
-  
-    handler = Object.fromEntries(
-      Realm.TRAPS.map(op => [
-        op,
-        (target, ...args) =>{
+    const handler = Object.fromEntries(
+      Realm.TRAPS.map(op => [op, (target, ...args) => {
           if (this.origin) return Reflect[op](target, ...args);
-          return ((this.travel[op]?.({ target, args, node: this.tree, realm: this }))
-          ?? Reflect[op](target, ...args))
-        }
-      ])
-    ); //second handler, proxy handler
-    
-    Object.setPrototypeOf(globalThis, new Proxy(_proto, handler)); //set global prototype
+          let output = this.travel[op]?.({ target, args, node: this.tree, realm: this })
+          return output ?? Reflect[op](target, ...args)
+        }])
+    );
+
+    Object.setPrototypeOf(globalThis, new Proxy(Object.create(null), handler));
   }
 
   container(name) {
