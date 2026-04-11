@@ -1,3 +1,5 @@
+let window = Object.create(null)
+
 class Realm {
   static TRAPS = [
     'get',
@@ -43,7 +45,7 @@ class Realm {
         }])
     );
 
-    Object.setPrototypeOf(globalThis, new Proxy(Object.create(null), handler));
+    Object.setPrototypeOf(globalThis, new Proxy(window, handler));
   }
 
   container(name) {
