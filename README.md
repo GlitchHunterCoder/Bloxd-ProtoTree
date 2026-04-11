@@ -49,6 +49,72 @@ realm.global.scopeA = realm.global.scopeA // object points to itself
 
 ---
 
+## Global Tiers
+
+ProtoTree exposes three tiers of global access:
+
+| Name | What it is | Proxy behaviour |
+|---|---|---|
+| `globalThis` | the real global object | prototype is proxied — unqualified names that aren't own properties hit travel |
+| `global` | `Proxy(globalThis, bypass)` | writes go directly to globalThis as own properties, bypassing travel |
+| `window` | `Object.create(null)` | completely separate from globalThis, lexically scoped, never proxied |
+
+### `globalThis`
+
+all unqualified variable access flows through `globalThis`
+if a name exists as an own property, it is found immediately — travel never fires
+if it doesn't exist as an own property, JS walks the prototype chain and hits the proxy — travel fires
+
+```js
+// own property — never hits proxy
+globalThis.x = 1
+x  // found immediately, travel never fires
+
+// not an own property — hits proxy
+y  // not on globalThis → prototype chain → proxy → travel fires
+```
+
+### `global`
+
+`global` exists for **writes** — setting via `global.x = 1` writes directly to `globalThis` as an own property, bypassing travel entirely
+once written this way, subsequent reads also bypass the proxy since own properties are found first
+
+```js
+global.score = 0  // writes directly to globalThis, travel never fires
+score             // own property now — reads never hit proxy either
+score = 1         // unqualified set — travel intercepts this
+```
+
+use `global` when you need to declare a true global that travel should never touch — system state, type metadata, utilities used inside travel handlers themselves
+
+```js
+// safe to use inside travel handlers — wont recurse
+global.console.log("hello")  // reads console directly off globalThis
+global.isWorldCode = () => { ... }  // stores without travel intercepting
+```
+
+### `window`
+
+`window` is a plain `Object.create(null)` stored as a lexical `let` variable, not on `globalThis`
+because it is resolved lexically at parse time, it is completely invisible to the proxy — nothing in ProtoTree can intercept it
+
+```js
+// safest place for internals
+window._pending = null    // type system pending state
+window.TypeMeta = new Map() // type registry
+window.SECRET = Symbol()  // private symbols
+```
+
+the difference from `global` — `global` writes to `globalThis` so the values become accessible as bare names
+`window` is a separate object entirely, only accessible as `window.x`, never as bare `x`
+
+```js
+global.score = 0  // accessible as bare `score` anywhere
+window.score = 0  // only accessible as `window.score`, bare `score` still hits proxy
+```
+
+---
+
 # User Notes
 
 ## All User Features
