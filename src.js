@@ -41,7 +41,7 @@ class Realm {
       Realm.TRAPS.map(op => [op, (target, ...args) => {
           if (this.origin) return Reflect[op](target, ...args);
           let output = this.travel[op]?.({ target, args, node: this.tree, realm: this })
-          return output ?? Reflect[op](target, ...args)
+          return output ?? Reflect[op](global, ...args) //defaults to globalThis
         }])
     );
 
