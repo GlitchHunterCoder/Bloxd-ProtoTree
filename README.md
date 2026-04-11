@@ -154,21 +154,22 @@ every trap function receives a single context object
 
 ### `args` per trap
 
-| Trap | `args` |
-|---|---|
-| `get` | `[key, receiver]` |
-| `set` | `[key, value, receiver]` |
-| `has` | `[key]` |
-| `deleteProperty` | `[key]` |
-| `defineProperty` | `[key, descriptor]` |
-| `getOwnPropertyDescriptor` | `[key]` |
-| `ownKeys` | `[]` |
-| `getPrototypeOf` | `[]` |
-| `setPrototypeOf` | `[proto]` |
-| `isExtensible` | `[]` |
-| `preventExtensions` | `[]` |
-| `apply` | `[thisArg, argsList]` |
-| `construct` | `[argsList, newTarget]` |
+| Trap                       | `args`                   | Return value (what it does)                                                        |
+| -------------------------- | ------------------------ | ---------------------------------------------------------------------------------- |
+| `get`                      | `[key, receiver]`        | **Any value** → becomes `obj[key]` result                                          |
+| `set`                      | `[key, value, receiver]` | **Boolean** → `true` = success, `false` = assignment fails (throws in strict mode) |
+| `has`                      | `[key]`                  | **Boolean** → result of `"key" in obj`                                             |
+| `deleteProperty`           | `[key]`                  | **Boolean** → `true` = deleted, `false` = failed (throws in strict mode)           |
+| `defineProperty`           | `[key, descriptor]`      | **Boolean** → `true` = defined, `false` = failure                                  |
+| `getOwnPropertyDescriptor` | `[key]`                  | **Object / undefined** → descriptor or "doesn’t exist"                             |
+| `ownKeys`                  | `[]`                     | **Array of keys** → controls `Object.keys`, `Reflect.ownKeys`, etc                 |
+| `getPrototypeOf`           | `[]`                     | **Object / null** → prototype of the object                                        |
+| `setPrototypeOf`           | `[proto]`                | **Boolean** → success/failure                                                      |
+| `isExtensible`             | `[]`                     | **Boolean** → controls `Object.isExtensible`                                       |
+| `preventExtensions`        | `[]`                     | **Boolean** → `true` if object is now non-extensible                               |
+| `apply`                    | `[thisArg, argsList]`    | **Any value** → return value of function call                                      |
+| `construct`                | `[argsList, newTarget]`  | **Object** → the constructed instance                                              |
+
 
 ### Return values
 
