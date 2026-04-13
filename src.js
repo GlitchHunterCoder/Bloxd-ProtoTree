@@ -17,9 +17,7 @@ class Realm {
     'construct',
   ];
 
-  constructor({ scopes={}, tree={}, travel={} }={}) {
-    this.scopes = scopes;
-    this.tree = tree;
+  constructor(travel={}) {
     this.travel = travel;
     this.origin = false;
 
@@ -40,17 +38,11 @@ class Realm {
     const handler = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (target, ...args) => {
           if (this.origin) return Reflect[op](target, ...args);
-          let output = this.travel[op]?.({ target, args, node: this.tree, realm: this })
+          let output = this.travel[op]?.(args)
           return output ?? Reflect[op](global, ...args) //defaults to globalThis
         }])
     );
 
     Object.setPrototypeOf(globalThis, new Proxy(window, handler));
-  }
-
-  container(name) {
-    const c = this.scopes[name];
-    if (!c) throw new Error(`Realm: no scope registered as "${name}"`);
-    return c;
   }
 }
