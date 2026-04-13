@@ -6,111 +6,87 @@ this project exists because i was exploring how prototype chains work in javascr
 and how bare name lookup flows through `globalThis` and its prototype
 i realised that if you could control that chain, you could define entirely custom scoping rules
 rules that no language gives you natively — read only memory, type enforcement, permission gates, dynamic rollback
-and so this was made, a tool to define the topology of scopes as a tree, web, or chain
-and supply your own traversal logic to control exactly how variables are found and written
+and so this was made, a tool to intercept all variable access on `globalThis`
+and supply your own logic to control exactly how variables are found and written
 
 ---
 
 ## Main Premise: `Realm`
 
-the core idea is that all scopes live inside one master object called a `Realm`
-which has three parts — a registry of scope containers, a topology describing how they relate, and a `travel` object defining how traversal works
+the core idea is simple — `Realm` replaces the prototype of `globalThis` with a Proxy
+every bare name lookup that isn't an own property of `globalThis` flows through that proxy
+and your `travel` object decides what happens
 
 what sets this apart from other approaches:
 most scope tools are flat — you pick a namespace explicitly (`BS["world"].myUtil`)
-ProtoTree makes scopes traversable — you just write `myUtil()` and travel decides where to find it
+ProtoTree makes bare name lookup interceptable — you just write `myUtil()` and travel decides where to find it
 and because travel is yours to define, the rules can be anything
-
-### Short Explanation of the Topology
-
-the `global` object describes the shape of your scope graph
-it is not a flat list — it is a tree, web, or chain of named nodes
-
-```js
-global: {
-  scopeA: {         // top level, searched first
-    scopeB: {       // child of A
-      scopeC: {}    // leaf
-    }
-  }
-}
-```
-
-name reuse is not a cycle — `scopeA → scopeB → scopeA → scopeC` is a valid path
-a true cycle is when a node's object reference points back to itself
-
-```js
-// NOT a cycle — name reused as a label
-global: { scopeA: { scopeB: { scopeA: { scopeC: {} } } } }
-
-// TRUE cycle — same object reference
-realm.global.scopeA = realm.global.scopeA // object points to itself
-```
 
 ---
 
 ## Global Tiers
 
-ProtoTree exposes three tiers of global access:
+ProtoTree exposes three tiers of access, each with different proxy behaviour:
 
 | Name | What it is | Proxy behaviour |
 |---|---|---|
-| `globalThis` | the real global object | prototype is proxied — unqualified names that aren't own properties hit travel |
-| `global` | `Proxy(globalThis, bypass)` | writes go directly to globalThis as own properties, bypassing travel |
-| `window` | `Object.create(null)` | completely separate from globalThis, lexically scoped, never proxied |
+| `globalThis` | the real global object | own properties bypass travel entirely, missing properties hit the proxy |
+| `global` | unproxied window into `globalThis` | reads and writes go directly to `globalThis`, travel never fires |
+| `window` | `Object.create(null)` | completely separate from `globalThis`, lexically scoped, never proxied |
 
 ### `globalThis`
 
 all unqualified variable access flows through `globalThis`
-if a name exists as an own property, it is found immediately — travel never fires
-if it doesn't exist as an own property, JS walks the prototype chain and hits the proxy — travel fires
+if a name exists as an own property it is found immediately — travel never fires
+if it doesn't, JS walks the prototype chain and hits the proxy — travel fires
 
 ```js
-// own property — never hits proxy
 globalThis.x = 1
-x  // found immediately, travel never fires
+x  // own property — travel never fires
 
-// not an own property — hits proxy
-y  // not on globalThis → prototype chain → proxy → travel fires
+y  // not an own property → proxy → travel fires
 ```
 
 ### `global`
 
-`global` exists for **writes** — setting via `global.x = 1` writes directly to `globalThis` as an own property, bypassing travel entirely
-once written this way, subsequent reads also bypass the proxy since own properties are found first
+`global` is a clean escape hatch — reads and writes go directly to `globalThis` without travel intercepting
 
 ```js
-global.score = 0  // writes directly to globalThis, travel never fires
-score             // own property now — reads never hit proxy either
-score = 1         // unqualified set — travel intercepts this
+global.World  = { gravity: 9.8 }  // writes directly to globalThis
+global.Code   = { gravity: 1.5 }  // same
+global.myId                        // reads directly, travel never fires
 ```
 
-use `global` when you need to declare a true global that travel should never touch — system state, type metadata, utilities used inside travel handlers themselves
+use `global` inside travel handlers to safely read containers and context without recursing
 
 ```js
-// safe to use inside travel handlers — wont recurse
-global.console.log("hello")  // reads console directly off globalThis
-global.isWorldCode = () => { ... }  // stores without travel intercepting
+travel: {
+  get([key]) {
+    const myId = global.myId;         // safe — no recursion
+    return myId == void 0
+      ? global.World[key]             // safe — direct container access
+      : global.Code[key];
+  }
+}
 ```
 
 ### `window`
 
-`window` is a plain `Object.create(null)` stored as a lexical `let` variable, not on `globalThis`
-because it is resolved lexically at parse time, it is completely invisible to the proxy — nothing in ProtoTree can intercept it
+`window` is a plain `Object.create(null)` — completely separate from `globalThis`
+because it is resolved lexically at parse time, nothing in ProtoTree can ever intercept it
+it is never accessible as a bare name, only as `window.x`
 
 ```js
-// safest place for internals
-window._pending = null    // type system pending state
-window.TypeMeta = new Map() // type registry
-window.SECRET = Symbol()  // private symbols
+window.TypeMeta  = new Map()  // type registry for travel internals
+window.visited   = new WeakSet()  // cycle detection state
+window.SECRET    = Symbol()   // private symbols
 ```
 
-the difference from `global` — `global` writes to `globalThis` so the values become accessible as bare names
-`window` is a separate object entirely, only accessible as `window.x`, never as bare `x`
+the key difference from `global`:
 
 ```js
-global.score = 0  // accessible as bare `score` anywhere
-window.score = 0  // only accessible as `window.score`, bare `score` still hits proxy
+global.score = 0   // bare `score` now resolves to this — travel sees it
+window.score = 0   // only accessible as `window.score` — travel never sees it
 ```
 
 ---
@@ -119,11 +95,9 @@ window.score = 0  // only accessible as `window.score`, bare `score` still hits 
 
 ## All User Features
 
-- `Realm`
-  - `scopes` — registry of scope names to their container objects `{ name → object }`
-  - `global` — topology describing how scopes relate
-  - `travel` — object of trap handlers, keys are trap names, only define what you need
-- `realm.container(name)` — resolves a scope name to its container, throws if not registered
+- `new Realm(travel)` — takes a travel object and hooks into `globalThis`
+- `global` — unproxied window into `globalThis`, safe to use inside travel
+- `window` — fully private lexical object, completely invisible to the proxy
 
 ---
 
@@ -131,118 +105,69 @@ window.score = 0  // only accessible as `window.score`, bare `score` still hits 
 
 `travel` is an object of functions keyed by proxy trap name
 each function is called when that trap fires on `globalThis`
-unhandled traps fall through to `Reflect` automatically — ProtoTree is fully transparent for anything you don't handle
+unhandled traps fall through to `Reflect` automatically
 
 ```js
-travel: {
-  get(ctx) { ... },
-  set(ctx) { ... },
-  // anything not defined here → Reflect handles it as normal JS
-}
+new Realm({
+  get([key]) { ... },
+  set([key, value]) { ... },
+  // anything not defined → Reflect handles it as normal JS
+})
 ```
-
-### Context Object
-
-every trap function receives a single context object
-
-| Property | Description |
-|---|---|
-| `target` | the raw Proxy target, passed to `Reflect` on fallback |
-| `args` | trap-specific arguments (see below) |
-| `node` | current position in the topology, starts at `realm.global` |
-| `realm` | the Realm instance — `.scopes`, `.global`, `.container()`, `.travel` |
 
 ### `args` per trap
 
-| Trap                       | `args`                   | Return value (what it does)                                                        |
-| -------------------------- | ------------------------ | ---------------------------------------------------------------------------------- |
-| `get`                      | `[key, receiver]`        | **Any value** → becomes `obj[key]` result                                          |
-| `set`                      | `[key, value, receiver]` | **Boolean** → `true` = success, `false` = assignment fails (throws in strict mode) |
-| `has`                      | `[key]`                  | **Boolean** → result of `"key" in obj`                                             |
-| `deleteProperty`           | `[key]`                  | **Boolean** → `true` = deleted, `false` = failed (throws in strict mode)           |
-| `defineProperty`           | `[key, descriptor]`      | **Boolean** → `true` = defined, `false` = failure                                  |
-| `getOwnPropertyDescriptor` | `[key]`                  | **Object / undefined** → descriptor or "doesn’t exist"                             |
-| `ownKeys`                  | `[]`                     | **Array of keys** → controls `Object.keys`, `Reflect.ownKeys`, etc                 |
-| `getPrototypeOf`           | `[]`                     | **Object / null** → prototype of the object                                        |
-| `setPrototypeOf`           | `[proto]`                | **Boolean** → success/failure                                                      |
-| `isExtensible`             | `[]`                     | **Boolean** → controls `Object.isExtensible`                                       |
-| `preventExtensions`        | `[]`                     | **Boolean** → `true` if object is now non-extensible                               |
-| `apply`                    | `[thisArg, argsList]`    | **Any value** → return value of function call                                      |
-| `construct`                | `[argsList, newTarget]`  | **Object** → the constructed instance                                              |
+each travel function receives the trap args directly as an array
 
+| Trap | `args` | Return value |
+|---|---|---|
+| `get` | `[key, receiver]` | **any value** → becomes the result of the lookup |
+| `set` | `[key, value, receiver]` | **boolean** → `true` = success, `false` = fails in strict mode |
+| `has` | `[key]` | **boolean** → result of `"key" in obj` |
+| `deleteProperty` | `[key]` | **boolean** → `true` = deleted |
+| `defineProperty` | `[key, descriptor]` | **boolean** → `true` = defined |
+| `getOwnPropertyDescriptor` | `[key]` | **object / undefined** → descriptor |
+| `ownKeys` | `[]` | **array of keys** → controls `Object.keys`, spread, destructuring |
+| `getPrototypeOf` | `[]` | **object / null** → prototype |
+| `setPrototypeOf` | `[proto]` | **boolean** → success/failure |
+| `isExtensible` | `[]` | **boolean** → controls `Object.isExtensible` |
+| `preventExtensions` | `[]` | **boolean** → `true` if now non-extensible |
+| `apply` | `[thisArg, argsList]` | **any value** → return value of call |
+| `construct` | `[argsList, newTarget]` | **object** → constructed instance |
 
 ### Return values
 
 | Return | Effect |
 |---|---|
 | any value | used directly as the trap result |
-| `null` or `undefined` | `Reflect[op](target, ...args)` handles it — default JS behaviour |
-
-### Recursing
-
-to go deeper into the topology, call the relevant travel handler again with an updated `node`
-ProtoTree never recurses on its own — you decide if, when, and where
-
-```js
-const result = realm.travel.get?.({ ...ctx, node: node[childName] });
-```
+| `null` or `undefined` | `Reflect[op]` handles it — default JS behaviour |
 
 ---
 
 ## Example User Programs
 
-### Depth-First Lookup
+### Basic Scope Routing
 
 ```js
-const scopeA = { myUtil: () => "hello from A", x: 1 };
-const scopeB = { helper: () => "hello from B", x: 2 };
-const scopeC = { deep: 42 };
+global.World = { gravity: 9.8, time: 0 };
+global.Code  = { gravity: 1.5, score: 0 };
 
 new Realm({
-  scopes: { scopeA, scopeB, scopeC },
-  global: {
-    scopeA: {
-      scopeB: {
-        scopeC: {}
-      }
-    }
+  get([key]) {
+    const myId = global.myId;
+    return myId == void 0
+      ? global.World[key]   // world code — route to World
+      : global.Code[key];   // code block — route to Code
   },
-  travel: {
-    get({ args, node, realm }) {
-      const [key] = args;
-      for (const name of Object.keys(node)) {
-        const c = realm.scopes[name];
-        if (c && key in c) return c[key];
-        const result = realm.travel.get?.({ args, node: node[name], realm });
-        if (result != null) return result;
-      }
-    },
-    has({ args, node, realm }) {
-      const [key] = args;
-      for (const name of Object.keys(node)) {
-        const c = realm.scopes[name];
-        if (c && key in c) return true;
-        const result = realm.travel.has?.({ args, node: node[name], realm });
-        if (result != null) return result;
-      }
-    },
-    set({ args, node, realm }) {
-      const [key, value] = args;
-      for (const name of Object.keys(node)) {
-        const c = realm.scopes[name];
-        if (c && key in c) { c[key] = value; return true; }
-        const result = realm.travel.set?.({ args, node: node[name], realm });
-        if (result != null) return result;
-      }
-      throw new Error(`Realm: "${key}" not found in any scope — declare it first`);
-    }
+  set([key, value]) {
+    const myId = global.myId;
+    const target = myId == void 0 ? global.World : global.Code;
+    if (key in target) { target[key] = value; return true; }
+    throw new Error(`"${key}" not found`);
   }
 });
 
-myUtil()  // "hello from A"
-helper()  // "hello from B"
-deep      // 42
-x         // 1  (scopeA.x shadows scopeB.x)
+gravity  // 1.5 if inside a code block, 9.8 if world code
 ```
 
 ---
@@ -250,12 +175,12 @@ x         // 1  (scopeA.x shadows scopeB.x)
 ### Read Only Scope
 
 ```js
-travel: {
-  get({ args, node, realm }) { /* normal lookup */ },
-  set() {
-    throw new Error("this scope is read only");
+new Realm({
+  get([key]) { return global.Constants[key]; },
+  set([key]) {
+    throw new Error(`"${key}" is read only`);
   }
-}
+});
 ```
 
 ---
@@ -263,20 +188,20 @@ travel: {
 ### Type Enforced Scope
 
 ```js
-travel: {
-  set({ args, node, realm }) {
-    const [key, value] = args;
-    for (const name of Object.keys(node)) {
-      const c = realm.scopes[name];
-      if (c && key in c) {
-        if (typeof value !== typeof c[key])
-          throw new TypeError(`Realm: "${key}" expected ${typeof c[key]}, got ${typeof value}`);
-        c[key] = value;
-        return true;
-      }
-    }
+global.World = { gravity: 9.8, count: 0 };
+
+new Realm({
+  set([key, value]) {
+    const c = global.World;
+    if (!(key in c)) throw new Error(`"${key}" not declared`);
+    if (typeof value !== typeof c[key])
+      throw new TypeError(`"${key}" expected ${typeof c[key]}, got ${typeof value}`);
+    c[key] = value;
+    return true;
   }
-}
+});
+
+gravity = "fast"  // TypeError: "gravity" expected number, got string
 ```
 
 ---
@@ -284,24 +209,47 @@ travel: {
 ### Prod / Staging / Testing Rollback
 
 ```js
-const testing = { featureX: () => "experimental" };
-const staging  = { featureX: () => "stable" };
-const prod     = { featureX: () => "live" };
+global.testing = { featureX: () => "experimental" };
+global.staging  = { featureX: () => "stable" };
+global.prod     = { featureX: () => "live" };
 
 new Realm({
-  scopes: { testing, staging, prod },
-  global: {
-    testing: {   // checked first
-      staging: { // fallback
-        prod: {} // final fallback
-      }
-    }
-  },
-  travel: { /* depth-first get/set as above */ }
+  get([key]) {
+    if (key in global.testing) return global.testing[key];
+    if (key in global.staging) return global.staging[key];
+    return global.prod[key];
+  }
 });
 
-featureX() // "experimental" — from testing
-// remove testing from scopes → falls back to staging automatically
+featureX()  // "experimental"
+
+// instant rollback — remove testing entries and staging takes over
+delete global.testing.featureX;
+featureX()  // "stable"
+```
+
+---
+
+### Expiring Variables
+
+```js
+window.expiry = new Map();  // stored in window — travel never sees it
+
+global.World = { sessionToken: null };
+
+window.expiry.set('sessionToken', Date.now() + 5000);  // expires in 5s
+
+new Realm({
+  get([key]) {
+    const exp = window.expiry.get(key);
+    if (exp && Date.now() > exp) {
+      delete global.World[key];
+      window.expiry.delete(key);
+      return undefined;
+    }
+    return global.World[key];
+  }
+});
 ```
 
 ---
@@ -309,13 +257,15 @@ featureX() // "experimental" — from testing
 ### Cycle Detection
 
 ```js
-travel: {
-  get(ctx, visited = new WeakSet()) {
-    if (visited.has(ctx.node)) return undefined; // true reference cycle, bail
-    visited.add(ctx.node);
-    // ... normal lookup
+window.visited = new WeakSet();
+
+new Realm({
+  get([key]) {
+    if (window.visited.has(global.node)) return undefined;
+    window.visited.add(global.node);
+    // ... lookup logic
   }
-}
+});
 ```
 
 ---
@@ -324,36 +274,29 @@ travel: {
 
 ## All Developer Features
 
-- `Realm.TRAPS` — static array of all 13 proxy trap names
-- full proxy coverage — all 13 traps are wired up and routed through `travel`
-- `Reflect` fallback — any unhandled trap or `null`/`undefined` return falls through to default JS behaviour
-- topology is plain data — `global` is just an object, mutate it at runtime to restructure scopes dynamically
-- `travel` is plain functions — swap handlers at runtime to change scoping rules on the fly
+- `Realm.TRAPS` — static array of all 13 proxy trap names, used to generate the handler map
+- `global` — built using a bypass proxy with an `origin` flag so reads/writes skip the main proxy entirely
+- `Reflect` fallback — any unhandled trap or `null`/`undefined` return falls through to `Reflect[op]` on `globalThis`
+- `window` — a plain `Object.create(null)` declared lexically before the class, safe for any internal state
 
 ---
 
 ## Example Developer Programs
 
-### Dynamic Topology at Runtime
-
-```js
-// narrow a scope at runtime by restructuring the graph
-realm.global.scopeA.scopeB = narrowedNode;
-// travel now resolves differently with no changes at the call site
-```
-
----
-
 ### Observable Scope
 
 ```js
-travel: {
-  get({ args, node, realm }) {
-    const [key] = args;
-    console.log(`get: ${key}`); // log every access
-    // ... normal lookup
+new Realm({
+  get([key]) {
+    console.log(`get: ${key}`);
+    return global.World[key];
+  },
+  set([key, value]) {
+    console.log(`set: ${key} =`, value);
+    global.World[key] = value;
+    return true;
   }
-}
+});
 ```
 
 ---
@@ -361,14 +304,13 @@ travel: {
 ### Permission Gated Scope
 
 ```js
-travel: {
-  get({ args, node, realm }) {
-    const [key] = args;
-    if (!currentUser.can('read', key))
+new Realm({
+  get([key]) {
+    if (!global.currentUser.can('read', key))
       throw new Error(`permission denied: ${key}`);
-    // ... normal lookup
+    return global.World[key];
   }
-}
+});
 ```
 
 ---
@@ -376,20 +318,36 @@ travel: {
 ### Lazy Evaluated Variables
 
 ```js
-const scopeA = { heavyValue: () => expensiveComputation() }; // thunk
+global.World = {
+  heavyValue: () => expensiveComputation()  // stored as thunk
+};
 
-travel: {
-  get({ args, node, realm }) {
-    const [key] = args;
-    for (const name of Object.keys(node)) {
-      const c = realm.scopes[name];
-      if (c && key in c) {
-        const v = c[key];
-        return typeof v === 'function' ? v() : v; // resolve thunk on access
-      }
-    }
+new Realm({
+  get([key]) {
+    const v = global.World[key];
+    return typeof v === 'function' ? v() : v;  // resolve thunk on access
   }
-}
+});
+```
+
+---
+
+### Dynamic Scope Switching at Runtime
+
+```js
+new Realm({
+  get([key]) {
+    // swap which container is active based on runtime state
+    const scope = global.strictMode ? global.Strict : global.Loose;
+    return scope[key];
+  }
+});
+
+global.strictMode = false;
+x  // from Loose
+
+global.strictMode = true;
+x  // from Strict — no code changes, just flipped a flag
 ```
 
 ---
@@ -400,50 +358,39 @@ travel: {
 
 - **Language simulation** — read only memory, type enforcement, expiring variables, lazy evaluation
 - **Sandboxing** — isolate variables per user, permission gated scopes, context-aware resolution
-- **Namespaces** — define how namespaces sit relative to each other and how they appear to `globalThis`
+- **Namespaces** — define how namespaces sit relative to each other and how they appear to bare name lookup
 - **Prototyping** — `prod` overrides `staging` overrides `testing`, instant rollback by removing a layer
-- **Organisation** — structure code with a scope web while keeping bare name lookup flat
+- **Organisation** — structure code behind scenes while keeping call sites looking like flat globals
 
 ## Full Example: Everything Together
 
 ```js
-const world    = { gravity: 9.8, time: 0 };
-const shared   = { logger: console.log };
-const code     = { gravity: 1.5 }; // shadows world.gravity for this block
+global.World  = { gravity: 9.8, time: 0 };
+global.Code   = { gravity: 1.5, score: 0 };
+global.Shared = { log: console.log };
+
+window.types = { gravity: 'number', time: 'number', score: 'number' };
 
 new Realm({
-  scopes: { world, shared, code },
-  global: {
-    code: {       // code block scope — checked first
-      world: {    // world scope — fallback
-        shared: {}// shared utilities — always available
-      }
-    }
+  get([key]) {
+    const myId = global.myId;
+    if (key in global.Shared) return global.Shared[key];
+    return myId == void 0 ? global.World[key] : global.Code[key];
   },
-  travel: {
-    get({ args, node, realm }) {
-      const [key] = args;
-      for (const name of Object.keys(node)) {
-        const c = realm.scopes[name];
-        if (c && key in c) return c[key];
-        const r = realm.travel.get?.({ args, node: node[name], realm });
-        if (r != null) return r;
-      }
-    },
-    set({ args, node, realm }) {
-      const [key, value] = args;
-      for (const name of Object.keys(node)) {
-        const c = realm.scopes[name];
-        if (c && key in c) { c[key] = value; return true; }
-        const r = realm.travel.set?.({ args, node: node[name], realm });
-        if (r != null) return r;
-      }
-      throw new Error(`Realm: "${key}" not found`);
-    }
+  set([key, value]) {
+    const myId = global.myId;
+    const target = myId == void 0 ? global.World : global.Code;
+    if (!(key in target)) throw new Error(`"${key}" not declared`);
+    const expected = window.types[key];
+    if (expected && typeof value !== expected)
+      throw new TypeError(`"${key}" expected ${expected}, got ${typeof value}`);
+    target[key] = value;
+    return true;
   }
 });
 
-gravity  // 1.5  — code scope shadows world
-time     // 0    — from world
-logger   // fn   — from shared
+gravity        // 1.5 inside code block, 9.8 in world code
+log("hello")   // always from Shared
+gravity = "x"  // TypeError — type enforced
+score = 10     // fine — correct type, routes to Code
 ```
