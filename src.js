@@ -19,13 +19,13 @@ class Realm {
 
   constructor(travel={}) {
     this.travel = travel;
-    this.origin = false;
+    this.disable = false;
 
     const bypass = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (...args) => {
-        this.origin = true;
+        this.disable = true;
         try { return Reflect[op](...args); }
-        finally { this.origin = false; }
+        finally { this.disable = false; }
       }])
     );
 
@@ -37,10 +37,15 @@ class Realm {
 
     const handler = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (target, ...args) => {
-          if (this.origin) return Reflect[op](target, ...args);
-          let output = this.travel[op]?.(args)
-          return output ?? Reflect[op](global, ...args) //defaults to globalThis
-        }])
+        if (this.disable) return Reflect[op](target, ...args);
+        this.disable = true;
+        try {
+          let output = this.travel[op]?.(args,this)
+          return output ?? Reflect[op](global, ...args)
+        } finally {
+          this.disable = false;
+        }
+      }])
     );
 
     Object.setPrototypeOf(globalThis, new Proxy(window, handler));
