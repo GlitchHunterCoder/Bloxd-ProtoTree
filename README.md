@@ -275,7 +275,7 @@ new Realm({
 ## All Developer Features
 
 - `Realm.TRAPS` — static array of all 13 proxy trap names, used to generate the handler map
-- `global` — built using a bypass proxy with an `origin` flag so reads/writes skip the main proxy entirely
+- `global` — built using a bypass proxy with an `disable` flag so reads/writes skip the main proxy entirely
 - `Reflect` fallback — any unhandled trap or `null`/`undefined` return falls through to `Reflect[op]` on `globalThis`
 - `window` — a plain `Object.create(null)` declared lexically before the class, safe for any internal state
 
