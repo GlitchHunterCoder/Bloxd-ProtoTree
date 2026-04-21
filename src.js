@@ -19,7 +19,7 @@ class Realm {
 
   constructor(travel={}) {
     this.travel = travel;
-    this.disable = false;
+    this.active = true;
     let origin = false;
   
     const bypass = Object.fromEntries(
@@ -38,13 +38,13 @@ class Realm {
   
     const handler = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (target, ...args) => {
-        if (origin || this.disable) return Reflect[op](target, ...args);
-        this.disable = true;
+        if (origin || !this.active) return Reflect[op](target, ...args);
+        this.active = false;
         try {
           let output = this.travel[op]?.(args, this)
           return output ?? Reflect[op](global, ...args)
         } finally {
-          this.disable = false;
+          this.active = true;
         }
       }])
     );
