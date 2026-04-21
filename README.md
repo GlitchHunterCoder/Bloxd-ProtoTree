@@ -367,9 +367,11 @@ x  // from Strict — no code changes, just flipped a flag
 ```js
 new Realm({
   get([key, receiver], realm) {
-    realm.active = false         // turn proxy off — safe to write without recursion
+    //realm.active = false         // turn proxy off — safe to write without recursion (default)
     globalThis[key] = "null"     // default value fill — own property now, travel won't fire again
-    realm.active = true          // turn proxy back on
+    //realm.active = true          // turn proxy back on (default)
+
+    //this is how it runs internally, can be changed by changing `realm.active` in code
   }
 })
 
