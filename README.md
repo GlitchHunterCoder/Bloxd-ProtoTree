@@ -98,6 +98,7 @@ window.score = 0   // only accessible as `window.score` — travel never sees it
 - `new Realm(travel)` — takes a travel object and hooks into `globalThis`
 - `global` — unproxied window into `globalThis`, safe to use inside travel
 - `window` — fully private lexical object, completely invisible to the proxy
+- `realm.active` — boolean flag, decides if proxy is activated or not, `false` blocks recursion (default), set to `true` inside a handler to allow recursive proxy access
 
 ---
 
@@ -134,6 +135,16 @@ each travel function receives the trap args directly as an array
 | `preventExtensions` | `[]` | **boolean** → `true` if now non-extensible |
 | `apply` | `[thisArg, argsList]` | **any value** → return value of call |
 | `construct` | `[argsList, newTarget]` | **object** → constructed instance |
+
+### `realm` argument
+
+each travel function receives the realm instance as its second argument
+use it to temporarily disable the proxy guard from inside a handler
+
+| Argument | What it is |
+|---|---|
+| `args` | trap arguments as an array |
+| `realm` | the active Realm instance — use to toggle proxy on/off |
 
 ### Return values
 
@@ -275,9 +286,10 @@ new Realm({
 ## All Developer Features
 
 - `Realm.TRAPS` — static array of all 13 proxy trap names, used to generate the handler map
-- `global` — built using a bypass proxy with an `disable` flag so reads/writes skip the main proxy entirely
+- `global` — built using a bypass proxy with an `active` flag so reads/writes skip the main proxy entirely
 - `Reflect` fallback — any unhandled trap or `null`/`undefined` return falls through to `Reflect[op]` on `globalThis`
 - `window` — a plain `Object.create(null)` declared lexically before the class, safe for any internal state
+- `realm.active` — recursion guard / proxy toggle, defaults to `false` (recursion blocked / proxy off). Set to `true` (recursion allowed / proxy on) inside a handler to allow the proxy to fire during handler execution.
 
 ---
 
@@ -348,6 +360,20 @@ x  // from Loose
 
 global.strictMode = true;
 x  // from Strict — no code changes, just flipped a flag
+```
+
+### Preventing Recursion
+
+```js
+new Realm({
+  get([key, receiver], realm) {
+    realm.active = false         // turn proxy off — safe to write without recursion
+    globalThis[key] = "null"     // default value fill — own property now, travel won't fire again
+    realm.active = true          // turn proxy back on
+  }
+})
+
+console.log(y)
 ```
 
 ---
