@@ -1,5 +1,8 @@
 # Bloxd-ProtoTree
 
+> [!NOTE]
+> **Project Status: Complete** — ProtoTree has reached its final form. The core mechanic is fully realized and no new primitives will be added. Everything that can be built, is built on top of what exists here.
+
 ## Why it was made
 
 this project exists because i was exploring how prototype chains work in javascript
@@ -13,14 +16,26 @@ and supply your own logic to control exactly how variables are found and written
 
 ## Main Premise: `Realm`
 
-the core idea is simple — `Realm` replaces the prototype of `globalThis` with a Proxy
-every bare name lookup that isn't an own property of `globalThis` flows through that proxy
+the core idea is simple — `Realm` hollows out `globalThis` and replaces its prototype with a Proxy
+every bare name lookup, whether the property exists or not, flows through that proxy
 and your `travel` object decides what happens
 
 what sets this apart from other approaches:
 most scope tools are flat — you pick a namespace explicitly (`BS["world"].myUtil`)
 ProtoTree makes bare name lookup interceptable — you just write `myUtil()` and travel decides where to find it
 and because travel is yours to define, the rules can be anything
+
+### The Three Holy Grails of JS Meta-Programming
+
+ProtoTree achieves full interception of all possible JS lookup paths:
+
+| # | What | How |
+|---|---|---|
+| 1 | bare name lookup for properties that **don't exist** on globalThis | prototype chain proxy — missing properties fall through |
+| 2 | bare name lookup for properties that **do exist** on globalThis | globalThis is hollowed out — all own properties moved to proxy layer |
+| 3 | **recursive proxy wrapping** — every returned value is itself proxied | `realm.wrap = true` wraps outputs in the same handler |
+
+the only limits are fundamental JS syntax constraints — object literals, closures, lexical declarations. everything that touches globalThis through a bare name is interceptable.
 
 ---
 
@@ -30,21 +45,19 @@ ProtoTree exposes three tiers of access, each with different proxy behaviour:
 
 | Name | What it is | Proxy behaviour |
 |---|---|---|
-| `globalThis` | the real global object | own properties bypass travel entirely, missing properties hit the proxy |
+| `globalThis` | the real global object | hollowed out — all lookups fall through to proxy |
 | `global` | unproxied window into `globalThis` | reads and writes go directly to `globalThis`, travel never fires |
 | `window` | `Object.create(null)` | completely separate from `globalThis`, lexically scoped, never proxied |
 
 ### `globalThis`
 
 all unqualified variable access flows through `globalThis`
-if a name exists as an own property it is found immediately — travel never fires
-if it doesn't, JS walks the prototype chain and hits the proxy — travel fires
+on startup ProtoTree hollows out all own properties and moves them to the proxy layer
+so every bare name lookup — whether the name exists or not — hits the proxy
 
 ```js
-globalThis.x = 1
-x  // own property — travel never fires
-
-y  // not an own property → proxy → travel fires
+Math    // exists — travel fires ✅
+y       // missing — travel fires ✅
 ```
 
 ### `global`
@@ -98,7 +111,8 @@ window.score = 0   // only accessible as `window.score` — travel never sees it
 - `new Realm(travel)` — takes a travel object and hooks into `globalThis`
 - `global` — unproxied window into `globalThis`, safe to use inside travel
 - `window` — fully private lexical object, completely invisible to the proxy
-- `realm.active` — boolean flag, decides if proxy is activated or not, `false` blocks recursion (default), set to `true` inside a handler to allow recursive proxy access
+- `realm.active` — boolean, controls if the proxy intercepts. defaults to `true`
+- `realm.wrap` — boolean, controls if returned values are recursively wrapped in the same proxy. defaults to `true`, opt in per trap call
 
 ---
 
@@ -139,12 +153,11 @@ each travel function receives the trap args directly as an array
 ### `realm` argument
 
 each travel function receives the realm instance as its second argument
-use it to temporarily disable the proxy guard from inside a handler
 
 | Argument | What it is |
 |---|---|
 | `args` | trap arguments as an array |
-| `realm` | the active Realm instance — use to toggle proxy on/off |
+| `realm` | the active Realm instance — use to toggle `active` and `wrap` |
 
 ### Return values
 
@@ -279,6 +292,21 @@ new Realm({
 });
 ```
 
+### Recursive Proxy Wrapping
+
+```js
+new Realm({
+  get([key], realm) {
+    realm.wrap = true          // every returned object/function is also proxied
+    return global.World[key]   // Math, console, any object — all wrapped recursively
+  }
+})
+
+Math         // proxied ✅
+Math.random  // also proxied ✅
+Math.random() // also proxied ✅
+```
+
 ---
 
 # Developer Notes
@@ -286,10 +314,13 @@ new Realm({
 ## All Developer Features
 
 - `Realm.TRAPS` — static array of all 13 proxy trap names, used to generate the handler map
-- `global` — built using a bypass proxy with an `active` flag so reads/writes skip the main proxy entirely
-- `Reflect` fallback — any unhandled trap or `null`/`undefined` return falls through to `Reflect[op]` on `globalThis`
+- `global` — built using a bypass proxy with an internal `_activate` flag so reads/writes skip the main proxy entirely
+- `Reflect` fallback — any unhandled trap or `null`/`undefined` return falls through to `Reflect[op]` on the snapshot
 - `window` — a plain `Object.create(null)` declared lexically before the class, safe for any internal state
-- `realm.active` — recursion guard / proxy toggle, defaults to `false` (recursion blocked / proxy off). Set to `true` (recursion allowed / proxy on) inside a handler to allow the proxy to fire during handler execution.
+- `_activate` — engine internal recursion guard, closure variable, user never touches it
+- `_wrap` — engine internal wrap lock, prevents double wrapping during proxy construction
+- `realm.active` — user toggle, pauses interception entirely when `false`
+- `realm.wrap` — user toggle, opts in to recursive proxy wrapping per trap call, resets to `false` after each trap
 
 ---
 
@@ -349,7 +380,6 @@ new Realm({
 ```js
 new Realm({
   get([key]) {
-    // swap which container is active based on runtime state
     const scope = global.strictMode ? global.Strict : global.Loose;
     return scope[key];
   }
@@ -367,20 +397,27 @@ x  // from Strict — no code changes, just flipped a flag
 ```js
 new Realm({
   get([key, receiver], realm) {
-    //realm.active = false         // turn proxy off — safe to write without recursion (default)
-    globalThis[key] = "null"     // default value fill — own property now, travel won't fire again
-    //realm.active = true          // turn proxy back on (default)
-
-    //this is how it runs internally, can be changed by changing `realm.active` in code
+    // realm.active defaults to false inside handler — no recursion
+    globalThis[key] = "null"  // safe — own property now, travel won't fire again
+    // set realm.active = true to allow recursive proxy firing
   }
 })
-
-console.log(y)
 ```
 
 ---
 
 # Outro
+
+## Known Limitations
+
+ProtoTree cannot intercept:
+- **Object/array literals** — `{}`, `[]` created inline never touch globalThis
+- **Closures** — variables captured in closure scope bypass globalThis entirely
+- **Lexical declarations** — `const`, `let`, `var` are scoped, not global lookups
+- **Private class fields** — `#field` is engine level, completely opaque
+- **Method calls on primitives** — `"hello".toUpperCase()` never routes through globalThis
+
+Everything else that touches globalThis through a bare name is interceptable.
 
 ## Use Cases
 
@@ -389,6 +426,8 @@ console.log(y)
 - **Namespaces** — define how namespaces sit relative to each other and how they appear to bare name lookup
 - **Prototyping** — `prod` overrides `staging` overrides `testing`, instant rollback by removing a layer
 - **Organisation** — structure code behind scenes while keeping call sites looking like flat globals
+- **Debugging** — full call graph tracing, time travel debugging, coverage tracking
+- **Type checking** — runtime TypeScript-like type enforcement on every assignment
 
 ## Full Example: Everything Together
 
