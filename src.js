@@ -1,68 +1,65 @@
 let window = Object.create(null)
 
 class Realm {
-  static TRAPS = ['get','set','has','deleteProperty','defineProperty','getOwnPropertyDescriptor','ownKeys','getPrototypeOf','setPrototypeOf','isExtensible','preventExtensions','apply','construct'];
-
+  static TRAPS = Object.getOwnPropertyNames(Reflect)
+  
   constructor(travel={}) {
     this.travel = travel;
     
-    //userside interface for proxy toggles
+    //user interface for proxy
     this.active = this.wrap = this.fallback = true
     
-    //engine side overrides
+    //engine proxy overrides
     let _activate = false, _wrap = false;
+    
+    // cache important globals for engine use
+    let {Reflect, Object, globalThis, Proxy} = new Function(`return globalThis`)()
 
-    // cache everything before any manipulation
-    const _Reflect = Reflect
-    const _Object = Object
-    const _globalThis = globalThis
-    const _Proxy = Proxy
+    let snapshot = Reflect.ownKeys(globalThis).reduce((o, k) => (o[k] = globalThis[k], o), {})
 
-    const bypass = Object.fromEntries(
+    let bypass = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (...args) => {
         _activate = true;
-        try { return _Reflect[op](...args); }
+        try { return Reflect[op](...args); }
         finally { _activate = false; }
       }])
     ); //global bypass
 
-    _Object.defineProperty(_globalThis, 'global', {
-      value: new Proxy(_globalThis, bypass),
+    Object.defineProperty(globalThis, 'global', {
+      value: new Proxy(globalThis, bypass),
       writable: true, configurable: true,
     });
 
-    const handler = Object.fromEntries(
+    let handler = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (...args) => {
-    
-        const allowTrap = this.active && !_activate;
-    
-        if (!allowTrap) {
-          return _Reflect[op](...args);
-        } //if trap is NOT on, use reflect
+        
+        //this.active
+        if (!this.active || _activate) {
+          return Reflect[op](...args);
+        }
     
         let output;
     
-        // run user logic (can recurse if user wants)
-        this.active = this.wrap = !(this.fallback = true) //sets to proxy off / wrap off / fallback on
+        // run user logic
+        this.active = this.wrap = this.fallback = false //sets (proxy / wrap / fallback) OFF
         try{
           output = this.travel[op]?.(args, this);
       
-          // fallback (engine protected)
+          //this.fallback
           if (this.fallback && output == void 0) {
             _activate = true;
             try {
-              output = _Reflect[op](...args);
+              output = Reflect[op](...args);
             } finally {
               _activate = false;
             }
           }
-  
-          const allowWrap = this.wrap && !_wrap;
           
-          if (allowWrap) {
+          //this.wrap
+          if (this.wrap && !_wrap) {
             _wrap = true;
             try {
-              output = new _Proxy(output, handler);
+              output = new Proxy(output, handler);
             } finally {
               _wrap = false;
             }
@@ -72,22 +69,18 @@ class Realm {
         } catch(e){
           throw e
         } finally {
-          this.active = this.wrap = true
+          this.active = this.wrap = this.fallback = true //sets (proxy / wrap / fallback) ON
         }
       }])
     );
 
-    // snapshot all globals before hollowing out
-    const snapshot = _Reflect.ownKeys(_globalThis)
-      .reduce((o, k) => (o[k] = _globalThis[k], o), {})
-
-    // hollow out globalThis so everything falls through to proxy
-    _Reflect.ownKeys(_globalThis).forEach(k => {
+    //remove globalThis
+    Reflect.ownKeys(globalThis).forEach(k => {
       if (k === 'globalThis') return
-      try { delete _globalThis[k] } catch(e) {}
+      try { delete globalThis[k] } catch(e) {}
     })
 
-    // set proxy as prototype — catches missing AND existing properties
-    _Object.setPrototypeOf(_globalThis, new _Proxy(snapshot, handler));
+    //create chain ( hollowGlobal -> globalClone -> prototype )
+    Object.setPrototypeOf(globalThis, new Proxy(snapshot, handler));
   }
 }
