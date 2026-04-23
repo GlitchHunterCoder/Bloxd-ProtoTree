@@ -7,12 +7,10 @@ class Realm {
     this.travel = travel;
     
     //userside interface for proxy toggles
-    this.active = true  // controls if proxy intercepts
-    this.wrap = true    // controls if outputs get wrapped in a new Realm proxy
+    this.active = this.wrap = this.fallback = true
     
     //engine side overrides
-    let _activate = false;
-    let _wrap = false;
+    let _activate = false, _wrap = false;
 
     // cache everything before any manipulation
     const _Reflect = Reflect
@@ -34,26 +32,26 @@ class Realm {
     });
 
     const handler = Object.fromEntries(
-      Realm.TRAPS.map(op => [op, (target, ...args) => {
+      Realm.TRAPS.map(op => [op, (...args) => {
     
         const allowTrap = this.active && !_activate;
     
         if (!allowTrap) {
-          return _Reflect[op](target, ...args);
+          return _Reflect[op](...args);
         } //if trap is NOT on, use reflect
     
         let output;
     
         // run user logic (can recurse if user wants)
-        this.active = this.wrap = false //sets to proxy off / wrap off
+        this.active = this.wrap = !(this.fallback = true) //sets to proxy off / wrap off / fallback on
         try{
           output = this.travel[op]?.(args, this);
       
           // fallback (engine protected)
-          if (output === undefined) {
+          if (this.fallback && output == void 0) {
             _activate = true;
             try {
-              output = _Reflect[op](target, ...args);
+              output = _Reflect[op](...args);
             } finally {
               _activate = false;
             }
@@ -61,15 +59,12 @@ class Realm {
   
           const allowWrap = this.wrap && !_wrap;
           
-          if (allowWrap &&
-              output !== null && output !== undefined &&
-              (typeof output === 'object' || typeof output === 'function')) {
-          
-            _wrap = true; // NO wrapping (lock)
+          if (allowWrap) {
+            _wrap = true;
             try {
               output = new _Proxy(output, handler);
             } finally {
-              _wrap = false; // allow again
+              _wrap = false;
             }
           }
       
@@ -79,7 +74,6 @@ class Realm {
         } finally {
           this.active = this.wrap = true
         }
-    
       }])
     );
 
