@@ -6,9 +6,7 @@ class Realm {
   constructor(travel={}) {
     this.travel = travel;
     
-    this.active = true
-    this.wrap = false
-    this.fallback = true
+    this.active = true, this.wrap = false, this.fallback = true
     
     let _active = false, _wrap = false;
     let _Reflect = Reflect, _Object = Object, _globalThis = globalThis, _Proxy = Proxy
@@ -34,7 +32,7 @@ class Realm {
         // snapshot user flags before zeroing
         let _snapActive = this.active, _snapFallback = this.fallback, _snapWrap = this.wrap
 
-        if (!this.active || _active) {
+        if (!_snapActive || _active) {
           return _Reflect[op](...args);
         }
 
