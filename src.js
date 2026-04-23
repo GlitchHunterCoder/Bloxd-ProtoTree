@@ -2,8 +2,10 @@ let window = Object.create(null)
 
 class Realm {
   static TRAPS = Object.getOwnPropertyNames(Reflect)
-
+  static ONE = false
+  
   constructor(travel={}) {
+    if(Realm.ONE){return}
     this.travel = travel;
     
     this.active = true, this.wrap = false, this.fallback = true
@@ -80,5 +82,6 @@ class Realm {
     })
 
     _Object.setPrototypeOf(_globalThis, new _Proxy(snapshot, handler));
+    Realm.ONE = true
   }
 }
