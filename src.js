@@ -1,7 +1,7 @@
 let window = Object.create(null)
 
 class Realm {
-  static TRAPS = ['get','set','has','deleteProperty','defineProperty','getOwnPropertyDescriptor','ownKeys','getPrototypeOf','setPrototypeOf','isExtensible','preventExtensions','apply','construct']
+  static TRAPS = Object.getOwnPropertyNames(Reflect)
 
   constructor(travel={}) {
     this.travel = travel;
@@ -71,9 +71,7 @@ class Realm {
         } catch(e) {
           throw e
         } finally {
-          this.active = true
-          this.wrap = false
-          this.fallback = true
+          this.active = true, this.wrap = false, this.fallback = true
         }
       }])
     );
