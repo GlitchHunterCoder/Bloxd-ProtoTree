@@ -111,8 +111,9 @@ window.score = 0   // only accessible as `window.score` — travel never sees it
 - `new Realm(travel)` — takes a travel object and hooks into `globalThis`
 - `global` — unproxied window into `globalThis`, safe to use inside travel
 - `window` — fully private lexical object, completely invisible to the proxy
-- `realm.active` — boolean, controls if the proxy intercepts. defaults to `true`
-- `realm.wrap` — boolean, controls if returned values are recursively wrapped in the same proxy. defaults to `true`, opt in per trap call
+- `realm.active` — boolean, controls if the proxy intercepts. defaults to `false` within trap
+- `realm.wrap` — boolean, controls if returned values are recursively wrapped in the same proxy. defaults to `false` within trap
+- `realm.fallback` — boolean, controls if output from travel if `null | undefined` default to `Reflect`, defaults to `false` within trap
 
 ---
 
@@ -164,7 +165,7 @@ each travel function receives the realm instance as its second argument
 | Return | Effect |
 |---|---|
 | any value | used directly as the trap result |
-| `null` or `undefined` | `Reflect[op]` handles it — default JS behaviour |
+| `null` or `undefined` | `Reflect[op]` handles it if `realm.fallback == true` — default JS behaviour, else it is returned as is |
 
 ---
 
@@ -321,6 +322,7 @@ Math.random() // also proxied ✅
 - `_wrap` — engine internal wrap lock, prevents double wrapping during proxy construction
 - `realm.active` — user toggle, pauses interception entirely when `false`
 - `realm.wrap` — user toggle, opts in to recursive proxy wrapping per trap call, resets to `false` after each trap
+- `realm.fallback` — user toggle, controls if output from travel if `null | undefined` default to `Reflect`, defaults to `false`
 
 ---
 
