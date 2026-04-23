@@ -136,19 +136,19 @@ each travel function receives the trap args directly as an array
 
 | Trap | `args` | Return value |
 |---|---|---|
-| `get` | `[key, receiver]` | **any value** → becomes the result of the lookup |
-| `set` | `[key, value, receiver]` | **boolean** → `true` = success, `false` = fails in strict mode |
-| `has` | `[key]` | **boolean** → result of `"key" in obj` |
-| `deleteProperty` | `[key]` | **boolean** → `true` = deleted |
-| `defineProperty` | `[key, descriptor]` | **boolean** → `true` = defined |
-| `getOwnPropertyDescriptor` | `[key]` | **object / undefined** → descriptor |
-| `ownKeys` | `[]` | **array of keys** → controls `Object.keys`, spread, destructuring |
-| `getPrototypeOf` | `[]` | **object / null** → prototype |
-| `setPrototypeOf` | `[proto]` | **boolean** → success/failure |
-| `isExtensible` | `[]` | **boolean** → controls `Object.isExtensible` |
-| `preventExtensions` | `[]` | **boolean** → `true` if now non-extensible |
-| `apply` | `[thisArg, argsList]` | **any value** → return value of call |
-| `construct` | `[argsList, newTarget]` | **object** → constructed instance |
+| `get` | `[target, key, receiver]` | **any value** → becomes the result of the lookup |
+| `set` | `[target, key, value, receiver]` | **boolean** → `true` = success, `false` = fails in strict mode |
+| `has` | `[target, key]` | **boolean** → result of `"key" in obj` |
+| `deleteProperty` | `[target, key]` | **boolean** → `true` = deleted |
+| `defineProperty` | `[target, key, descriptor]` | **boolean** → `true` = defined |
+| `getOwnPropertyDescriptor` | `[target, key]` | **object / undefined** → descriptor |
+| `ownKeys` | `[target]` | **array of keys** → controls `Object.keys`, spread, destructuring |
+| `getPrototypeOf` | `[target]` | **object / null** → prototype |
+| `setPrototypeOf` | `[target, proto]` | **boolean** → success/failure |
+| `isExtensible` | `[target]` | **boolean** → controls `Object.isExtensible` |
+| `preventExtensions` | `[target]` | **boolean** → `true` if now non-extensible |
+| `apply` | `[target, thisArg, argsList]` | **any value** → return value of call |
+| `construct` | `[target, argsList, newTarget]` | **object** → constructed instance |
 
 ### `realm` argument
 
