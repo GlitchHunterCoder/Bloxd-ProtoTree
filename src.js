@@ -2,7 +2,7 @@ let window = Object.create(null)
 
 class Realm {
   static TRAPS = Object.getOwnPropertyNames(Reflect)
-  
+
   constructor(travel={}) {
     this.travel = travel;
     
@@ -11,31 +11,31 @@ class Realm {
     
     //engine proxy overrides
     let _activate = false, _wrap = false;
-    
-    // cache important globals for engine use
-    let {Reflect, Object, globalThis, Proxy} = new Function(`return globalThis`)()
 
-    let snapshot = Reflect.ownKeys(globalThis).reduce((o, k) => (o[k] = globalThis[k], o), {})
+    // cache everything before any manipulation
+    let _Reflect = Reflect, _Object = Object, _globalThis = globalThis, _Proxy = Proxy
 
+    let snapshot = _Reflect.ownKeys(globalThis).reduce((o, k) => (o[k] = _globalThis[k], o), {})
+      
     let bypass = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (...args) => {
         _activate = true;
-        try { return Reflect[op](...args); }
+        try { return _Reflect[op](...args); }
         finally { _activate = false; }
       }])
     ); //global bypass
 
-    Object.defineProperty(globalThis, 'global', {
-      value: new Proxy(globalThis, bypass),
+    _Object.defineProperty(_globalThis, 'global', {
+      value: new Proxy(_globalThis, bypass),
       writable: true, configurable: true,
     });
 
     let handler = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (...args) => {
-        
+
         //this.active
         if (!this.active || _activate) {
-          return Reflect[op](...args);
+          return _Reflect[op](...args);
         }
     
         let output;
@@ -46,20 +46,23 @@ class Realm {
           output = this.travel[op]?.(args, this);
       
           //this.fallback
-          if (this.fallback && output == void 0) {
+          if (output == void 0) {
             _activate = true;
             try {
-              output = Reflect[op](...args);
+              if(this.fallback){
+                  throw "SKIP"
+              } //make-shift && for this.fallback if
+              output = _Reflect[op](...args);
             } finally {
               _activate = false;
             }
           }
-          
+
           //this.wrap
           if (this.wrap && !_wrap) {
             _wrap = true;
             try {
-              output = new Proxy(output, handler);
+              output = new _Proxy(output, handler);
             } finally {
               _wrap = false;
             }
@@ -71,16 +74,17 @@ class Realm {
         } finally {
           this.active = this.wrap = this.fallback = true //sets (proxy / wrap / fallback) ON
         }
+    
       }])
     );
 
-    //remove globalThis
-    Reflect.ownKeys(globalThis).forEach(k => {
+    // hollow out globalThis so everything falls through to proxy
+    _Reflect.ownKeys(_globalThis).forEach(k => {
       if (k === 'globalThis') return
-      try { delete globalThis[k] } catch(e) {}
+      try { delete _globalThis[k] } catch(e) {}
     })
 
     //create chain ( hollowGlobal -> globalClone -> prototype )
-    Object.setPrototypeOf(globalThis, new Proxy(snapshot, handler));
+    _Object.setPrototypeOf(_globalThis, new _Proxy(snapshot, handler));
   }
 }
