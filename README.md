@@ -33,7 +33,7 @@ ProtoTree achieves full interception of all possible JS lookup paths:
 |---|---|---|
 | 1 | bare name lookup for properties that **don't exist** on globalThis | prototype chain proxy — missing properties fall through |
 | 2 | bare name lookup for properties that **do exist** on globalThis | globalThis is hollowed out — all own properties moved to proxy layer |
-| 3 | **recursive proxy wrapping** — every returned value is itself proxied | `realm.wrap = true` wraps outputs in the same handler |
+| 3 | **recursive proxy wrapping** — every returned value is itself proxied | `Realm.wrap = true` wraps outputs in the same handler |
 
 the only limits are fundamental JS syntax constraints — object literals, closures, lexical declarations. everything that touches globalThis through a bare name is interceptable.
 
@@ -74,7 +74,7 @@ use `global` inside travel handlers to safely read containers and context withou
 
 ```js
 travel: {
-  get([key]) {
+  get(travel, key) {
     const myId = global.myId;         // safe — no recursion
     return myId == void 0
       ? global.World[key]             // safe — direct container access
@@ -82,6 +82,8 @@ travel: {
   }
 }
 ```
+
+note: `target` is always the snapshot object — in most cases you won't need it and can use `global` directly instead, kept for Reflect completeness
 
 ### `window`
 
@@ -104,16 +106,16 @@ window.score = 0   // only accessible as `window.score` — travel never sees it
 
 ---
 
-# User Notes
+# Notes
 
 ## All User Features
 
-- `new Realm(travel)` — takes a travel object and hooks into `globalThis`
+- `new Realm(travel)` — takes a travel object and hooks into `globalThis`, only one Realm can exist at a time
 - `global` — unproxied window into `globalThis`, safe to use inside travel
 - `window` — fully private lexical object, completely invisible to the proxy
-- `realm.active` — boolean, controls if the proxy intercepts. defaults to `false` within trap
-- `realm.wrap` — boolean, controls if returned values are recursively wrapped in the same proxy. defaults to `false` within trap
-- `realm.fallback` — boolean, controls if output from travel if `null | undefined` default to `Reflect`, defaults to `false` within trap
+- `Realm.active` — boolean, controls if the proxy intercepts. defaults to `false` within trap, restore with `Realm.active = true`
+- `Realm.wrap` — boolean, controls if returned values are recursively wrapped. defaults to `false` within trap
+- `Realm.fallback` — boolean, controls if `null | undefined` output falls through to Reflect. defaults to `false` within trap
 
 ---
 
@@ -125,47 +127,40 @@ unhandled traps fall through to `Reflect` automatically
 
 ```js
 new Realm({
-  get([key]) { ... },
-  set([key, value]) { ... },
+  get(travel, key) { ... },
+  set(travel, key, value) { ... },
   // anything not defined → Reflect handles it as normal JS
 })
 ```
 
 ### `args` per trap
 
-each travel function receives the trap args directly as an array
+each travel function receives the full proxy trap args directly
 
 | Trap | `args` | Return value |
 |---|---|---|
-| `get` | `[target, key, receiver]` | **any value** → becomes the result of the lookup |
-| `set` | `[target, key, value, receiver]` | **boolean** → `true` = success, `false` = fails in strict mode |
-| `has` | `[target, key]` | **boolean** → result of `"key" in obj` |
-| `deleteProperty` | `[target, key]` | **boolean** → `true` = deleted |
-| `defineProperty` | `[target, key, descriptor]` | **boolean** → `true` = defined |
-| `getOwnPropertyDescriptor` | `[target, key]` | **object / undefined** → descriptor |
-| `ownKeys` | `[target]` | **array of keys** → controls `Object.keys`, spread, destructuring |
-| `getPrototypeOf` | `[target]` | **object / null** → prototype |
-| `setPrototypeOf` | `[target, proto]` | **boolean** → success/failure |
-| `isExtensible` | `[target]` | **boolean** → controls `Object.isExtensible` |
-| `preventExtensions` | `[target]` | **boolean** → `true` if now non-extensible |
-| `apply` | `[target, thisArg, argsList]` | **any value** → return value of call |
-| `construct` | `[target, argsList, newTarget]` | **object** → constructed instance |
-
-### `realm` argument
-
-each travel function receives the realm instance as its second argument
-
-| Argument | What it is |
-|---|---|
-| `args` | trap arguments as an array |
-| `realm` | the active Realm instance — use to toggle `active` and `wrap` |
+| `get` | `(target, key, receiver)` | **any value** → becomes the result of the lookup |
+| `set` | `(target, key, value, receiver)` | **boolean** → `true` = success, `false` = fails in strict mode |
+| `has` | `(target, key)` | **boolean** → result of `"key" in obj` |
+| `deleteProperty` | `(target, key)` | **boolean** → `true` = deleted |
+| `defineProperty` | `(target, key, descriptor)` | **boolean** → `true` = defined |
+| `getOwnPropertyDescriptor` | `(target, key)` | **object / undefined** → descriptor |
+| `ownKeys` | `(target)` | **array of keys** → controls `Object.keys`, spread, destructuring |
+| `getPrototypeOf` | `(target)` | **object / null** → prototype |
+| `setPrototypeOf` | `(target, proto)` | **boolean** → success/failure |
+| `isExtensible` | `(target)` | **boolean** → controls `Object.isExtensible` |
+| `preventExtensions` | `(target)` | **boolean** → `true` if now non-extensible |
+| `apply` | `(target, thisArg, argsList)` | **any value** → return value of call |
+| `construct` | `(target, argsList, newTarget)` | **object** → constructed instance |
 
 ### Return values
 
 | Return | Effect |
 |---|---|
 | any value | used directly as the trap result |
-| `null` or `undefined` | `Reflect[op]` handles it if `realm.fallback == true` — default JS behaviour, else it is returned as is |
+| `null` or `undefined` + `Realm.fallback = true` | falls through to Reflect — default JS behaviour |
+| `null` or `undefined` + `Realm.fallback = false` | returned as is |
+| trap not defined in travel | always falls through to Reflect regardless of fallback |
 
 ---
 
@@ -178,13 +173,13 @@ global.World = { gravity: 9.8, time: 0 };
 global.Code  = { gravity: 1.5, score: 0 };
 
 new Realm({
-  get([key]) {
+  get(travel, key) {
     const myId = global.myId;
     return myId == void 0
       ? global.World[key]   // world code — route to World
       : global.Code[key];   // code block — route to Code
   },
-  set([key, value]) {
+  set(travel, key, value) {
     const myId = global.myId;
     const target = myId == void 0 ? global.World : global.Code;
     if (key in target) { target[key] = value; return true; }
@@ -201,8 +196,8 @@ gravity  // 1.5 if inside a code block, 9.8 if world code
 
 ```js
 new Realm({
-  get([key]) { return global.Constants[key]; },
-  set([key]) {
+  get(travel, key) { return global.Constants[key]; },
+  set(travel, key) {
     throw new Error(`"${key}" is read only`);
   }
 });
@@ -216,7 +211,7 @@ new Realm({
 global.World = { gravity: 9.8, count: 0 };
 
 new Realm({
-  set([key, value]) {
+  set(travel, key, value) {
     const c = global.World;
     if (!(key in c)) throw new Error(`"${key}" not declared`);
     if (typeof value !== typeof c[key])
@@ -239,7 +234,7 @@ global.staging  = { featureX: () => "stable" };
 global.prod     = { featureX: () => "live" };
 
 new Realm({
-  get([key]) {
+  get(travel, key) {
     if (key in global.testing) return global.testing[key];
     if (key in global.staging) return global.staging[key];
     return global.prod[key];
@@ -265,7 +260,7 @@ global.World = { sessionToken: null };
 window.expiry.set('sessionToken', Date.now() + 5000);  // expires in 5s
 
 new Realm({
-  get([key]) {
+  get(travel, key) {
     const exp = window.expiry.get(key);
     if (exp && Date.now() > exp) {
       delete global.World[key];
@@ -285,7 +280,7 @@ new Realm({
 window.visited = new WeakSet();
 
 new Realm({
-  get([key]) {
+  get(travel, key) {
     if (window.visited.has(global.node)) return undefined;
     window.visited.add(global.node);
     // ... lookup logic
@@ -297,8 +292,8 @@ new Realm({
 
 ```js
 new Realm({
-  get([key], realm) {
-    realm.wrap = true          // every returned object/function is also proxied
+  get(travel, key) {
+    Realm.wrap = true          // every returned object/function is also proxied
     return global.World[key]   // Math, console, any object — all wrapped recursively
   }
 })
@@ -315,14 +310,15 @@ Math.random() // also proxied ✅
 ## All Developer Features
 
 - `Realm.TRAPS` — static array of all 13 proxy trap names, used to generate the handler map
-- `global` — built using a bypass proxy with an internal `_activate` flag so reads/writes skip the main proxy entirely
-- `Reflect` fallback — any unhandled trap or `null`/`undefined` return falls through to `Reflect[op]` on the snapshot
-- `window` — a plain `Object.create(null)` declared lexically before the class, safe for any internal state
-- `_activate` — engine internal recursion guard, closure variable, user never touches it
+- `Realm.ONE` — singleton guard, prevents more than one Realm from being constructed
+- `Realm.UNHANDLED` — sentinel symbol returned when a trap is not defined in travel, always falls through to Reflect regardless of `Realm.fallback`
+- `Realm.travel` — static reference to the active travel object
+- `global` — built using a bypass proxy with an internal `_active` flag so reads/writes skip the main proxy entirely
+- `_active` — engine internal recursion guard, closure variable, user never touches it
 - `_wrap` — engine internal wrap lock, prevents double wrapping during proxy construction
-- `realm.active` — user toggle, pauses interception entirely when `false`
-- `realm.wrap` — user toggle, opts in to recursive proxy wrapping per trap call, resets to `false` after each trap
-- `realm.fallback` — user toggle, controls if output from travel if `null | undefined` default to `Reflect`, defaults to `false`
+- `Realm.active` — pauses interception entirely when `false`, reset to `true` after each trap
+- `Realm.wrap` — opts in to recursive proxy wrapping per trap call, reset to `false` after each trap
+- `Realm.fallback` — controls undefined/null fallthrough to Reflect, reset to `true` after each trap
 
 ---
 
@@ -332,11 +328,11 @@ Math.random() // also proxied ✅
 
 ```js
 new Realm({
-  get([key]) {
+  get(travel, key) {
     console.log(`get: ${key}`);
     return global.World[key];
   },
-  set([key, value]) {
+  set(travel, key, value) {
     console.log(`set: ${key} =`, value);
     global.World[key] = value;
     return true;
@@ -350,7 +346,7 @@ new Realm({
 
 ```js
 new Realm({
-  get([key]) {
+  get(travel, key) {
     if (!global.currentUser.can('read', key))
       throw new Error(`permission denied: ${key}`);
     return global.World[key];
@@ -368,7 +364,7 @@ global.World = {
 };
 
 new Realm({
-  get([key]) {
+  get(travel, key) {
     const v = global.World[key];
     return typeof v === 'function' ? v() : v;  // resolve thunk on access
   }
@@ -381,7 +377,7 @@ new Realm({
 
 ```js
 new Realm({
-  get([key]) {
+  get(travel, key) {
     const scope = global.strictMode ? global.Strict : global.Loose;
     return scope[key];
   }
@@ -398,10 +394,10 @@ x  // from Strict — no code changes, just flipped a flag
 
 ```js
 new Realm({
-  get([key, receiver], realm) {
-    // realm.active defaults to false inside handler — no recursion
+  get(travel, key, receiver) {
+    // Realm.active defaults to false inside handler — no recursion
     globalThis[key] = "null"  // safe — own property now, travel won't fire again
-    // set realm.active = true to allow recursive proxy firing
+    // set Realm.active = true to allow recursive proxy firing
   }
 })
 ```
@@ -441,12 +437,12 @@ global.Shared = { log: console.log };
 window.types = { gravity: 'number', time: 'number', score: 'number' };
 
 new Realm({
-  get([key]) {
+  get(travel, key) {
     const myId = global.myId;
     if (key in global.Shared) return global.Shared[key];
     return myId == void 0 ? global.World[key] : global.Code[key];
   },
-  set([key, value]) {
+  set(travel, key, value) {
     const myId = global.myId;
     const target = myId == void 0 ? global.World : global.Code;
     if (!(key in target)) throw new Error(`"${key}" not declared`);
