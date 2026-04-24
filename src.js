@@ -1,17 +1,19 @@
 let window = Object.create(null)
-
+ 
 class Realm {
   static TRAPS = Object.getOwnPropertyNames(Reflect)
   static ONE = false
-  
+  static active = true
+  static wrap = false
+  static fallback = false
+  static travel = void 0
+
   constructor(travel={}) {
     if(Realm.ONE){return}
-    this.travel = travel;
-    
-    this.active = true, this.wrap = false, this.fallback = true
+    Realm.travel = travel;
     
     let _active = false, _wrap = false;
-    let _Reflect = Reflect, _Object = Object, _globalThis = globalThis, _Proxy = Proxy
+    let _Reflect = Reflect, _Object = Object, _globalThis = globalThis, _Proxy = Proxy, _Date = Date
 
     let snapshot = _Reflect.ownKeys(_globalThis).reduce((o, k) => (o[k] = _globalThis[k], o), {})
       
@@ -30,22 +32,21 @@ class Realm {
 
     let handler = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (...args) => {
-
         // snapshot user flags before zeroing
-        let _snapActive = this.active, _snapFallback = this.fallback, _snapWrap = this.wrap
+        let _snapActive = Realm.active, _snapWrap = Realm.wrap, _snapFallback = Realm.fallback
 
         if (!_snapActive || _active) {
           return _Reflect[op](...args);
         }
 
-        this.active = false, this.wrap = false, this.fallback = true  // default fallback ON unless user turns off in travel
-
         let output;
         try {
-          output = this.travel[op]?.(args, this);
+          Realm.active = false, Realm.wrap = false, Realm.fallback = true
+
+          output = Realm.travel[op]?.(...args);
 
           // read user's choice from travel, then cache it
-          _snapActive = this.active, _snapFallback = this.fallback, _snapWrap = this.wrap
+          _snapActive = Realm.active, _snapWrap = Realm.wrap, _snapFallback = Realm.fallback
       
           if (_snapFallback && output == void 0) {
             _active = true;
@@ -71,7 +72,7 @@ class Realm {
         } catch(e) {
           throw e
         } finally {
-          this.active = true, this.wrap = false, this.fallback = true
+          Realm.active = true, Realm.wrap = false, Realm.fallback = true
         }
       }])
     );
