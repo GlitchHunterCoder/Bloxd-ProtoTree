@@ -42,7 +42,7 @@ class Realm {
 
         let output;
         try {
-          Realm.active = false, Realm.wrap = false, Realm.fallback = true
+          Realm.active = Realm.wrap = Realm.fallback = false
 
           output = Realm.travel[op] ? Realm.travel[op](...args) : Realm.UNHANDLED
 
@@ -73,7 +73,7 @@ class Realm {
         } catch(e) {
           throw e
         } finally {
-          Realm.active = true, Realm.wrap = false, Realm.fallback = true
+          Realm.active = Realm.wrap = Realm.fallback = true
         }
       }])
     );
