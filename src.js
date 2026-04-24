@@ -4,6 +4,7 @@ class Realm {
   static TRAPS = Object.getOwnPropertyNames(Reflect)
   static ONE = false
   static UNHANDLED = Symbol('unhandled')
+  static GLOBALREF = globalThis
   static active = true
   static wrap = false
   static fallback = false
@@ -14,20 +15,22 @@ class Realm {
     Realm.travel = travel;
     
     let _active = false, _wrap = false;
-    let _Reflect = Reflect, _Object = Object, _globalThis = globalThis, _Proxy = Proxy, _Date = Date
+    
+    let globalThis = Realm.GLOBALREF.globalThis
+    let Reflect = globalThis.Reflect, Object = globalThis.Object, Proxy = globalThis.Proxy
 
-    let snapshot = _Reflect.ownKeys(_globalThis).reduce((o, k) => (o[k] = _globalThis[k], o), {})
+    let snapshot = Reflect.ownKeys(globalThis).reduce((o, k) => (o[k] = globalThis[k], o), {})
       
     let bypass = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (...args) => {
         _active = true;
-        try { return _Reflect[op](...args); }
+        try { return Reflect[op](...args); }
         finally { _active = false; }
       }])
     );
 
-    _Object.defineProperty(_globalThis, 'global', {
-      value: new _Proxy(_globalThis, bypass),
+    Object.defineProperty(globalThis, 'global', {
+      value: new Proxy(globalThis, bypass),
       writable: true, configurable: true,
     });
 
@@ -37,7 +40,7 @@ class Realm {
         let _snapActive = Realm.active, _snapWrap = Realm.wrap, _snapFallback = Realm.fallback
 
         if (!_snapActive || _active) {
-          return _Reflect[op](...args);
+          return Reflect[op](...args);
         }
 
         let output;
@@ -52,7 +55,7 @@ class Realm {
           if (output === Realm.UNHANDLED || (_snapFallback && output == void 0)) {
             _active = true;
             try {
-              output = _Reflect[op](...args);
+              output = Reflect[op](...args)
             } finally {
               _active = false;
             }
@@ -63,7 +66,7 @@ class Realm {
               (typeof output === 'object' || typeof output === 'function')) {
             _wrap = true;
             try {
-              output = new _Proxy(output, handler);
+              output = new Proxy(output, handler);
             } finally {
               _wrap = false;
             }
@@ -78,12 +81,12 @@ class Realm {
       }])
     );
 
-    _Reflect.ownKeys(_globalThis).forEach(k => {
+    Reflect.ownKeys(globalThis).forEach(k => {
       if (k === 'globalThis') return
-      try { delete _globalThis[k] } catch(e) {}
+      try { delete globalThis[k] } catch(e) {}
     })
 
-    _Object.setPrototypeOf(_globalThis, new _Proxy(snapshot, handler));
+    Object.setPrototypeOf(globalThis, new Proxy(snapshot, handler));
     Realm.ONE = true
   }
 }
