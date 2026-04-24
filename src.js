@@ -3,6 +3,7 @@ let window = Object.create(null)
 class Realm {
   static TRAPS = Object.getOwnPropertyNames(Reflect)
   static ONE = false
+  static UNHANDLED = Symbol('unhandled')
   static active = true
   static wrap = false
   static fallback = false
@@ -43,12 +44,12 @@ class Realm {
         try {
           Realm.active = false, Realm.wrap = false, Realm.fallback = true
 
-          output = Realm.travel[op]?.(...args);
+          output = Realm.travel[op] ? Realm.travel[op](...args) : Realm.UNHANDLED
 
           // read user's choice from travel, then cache it
           _snapActive = Realm.active, _snapWrap = Realm.wrap, _snapFallback = Realm.fallback
       
-          if (_snapFallback && output == void 0) {
+          if (output === Realm.UNHANDLED || (_snapFallback && output == void 0)) {
             _active = true;
             try {
               output = _Reflect[op](...args);
