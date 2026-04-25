@@ -40,7 +40,7 @@ let Realm = class {
 
         let output;
         try {
-          Realm.active = Realm.wrap = Realm.fallback = Realm.boot = false
+          Realm.active = Realm.wrap = Realm.fallback = false
 
           output = Realm.travel[op]?.(...args)
           
@@ -53,7 +53,7 @@ let Realm = class {
             }
           }
 
-          if (Realm.wrap && !_wrap && output != void 0) {
+          if (Realm.wrap && !_wrap) {
             _wrap = true;
             try {
               output = new Proxy(output, handler);
@@ -63,10 +63,8 @@ let Realm = class {
           }
       
           return output;
-        } catch(e) {
-          throw e
         } finally {
-          Realm.active = Realm.wrap = Realm.fallback = Realm.boot = true
+          Realm.active = Realm.wrap = Realm.fallback = true
         }
       }])
     );
