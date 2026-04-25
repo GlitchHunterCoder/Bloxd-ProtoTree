@@ -1,10 +1,8 @@
 let window = Object.create(null)
  
-class Realm {
+let Realm = class {
   static TRAPS = Object.getOwnPropertyNames(Reflect)
   static ONE = false
-  static UNHANDLED = Symbol('unhandled')
-  static GLOBALREF = globalThis
   static active = true
   static wrap = false
   static fallback = false
@@ -15,9 +13,8 @@ class Realm {
     Realm.travel = travel;
     
     let _active = false, _wrap = false;
-    
-    let globalThis = Realm.GLOBALREF.globalThis
-    let Reflect = globalThis.Reflect, Object = globalThis.Object, Proxy = globalThis.Proxy
+    let globalThis = (0,eval)("globalThis.globalThis")
+    let {Reflect, Object, Proxy} = globalThis
 
     let snapshot = Reflect.ownKeys(globalThis).reduce((o, k) => (o[k] = globalThis[k], o), {})
       
@@ -36,23 +33,18 @@ class Realm {
 
     let handler = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (...args) => {
-        // snapshot user flags before zeroing
-        let _snapActive = Realm.active, _snapWrap = Realm.wrap, _snapFallback = Realm.fallback
 
-        if (!_snapActive || _active) {
+        if (!Realm.active || _active) {
           return Reflect[op](...args);
         }
 
         let output;
         try {
-          Realm.active = Realm.wrap = Realm.fallback = false
+          Realm.active = Realm.wrap = Realm.fallback = Realm.boot = false
 
-          output = Realm.travel[op] ? Realm.travel[op](...args) : Realm.UNHANDLED
-
-          // read user's choice from travel, then cache it
-          _snapActive = Realm.active, _snapWrap = Realm.wrap, _snapFallback = Realm.fallback
-      
-          if (output === Realm.UNHANDLED || (_snapFallback && output == void 0)) {
+          output = Realm.travel[op]?.(...args)
+          
+          if (Realm.fallback && output == void 0) {
             _active = true;
             try {
               output = Reflect[op](...args)
@@ -61,9 +53,7 @@ class Realm {
             }
           }
 
-          if (_snapWrap && !_wrap &&
-              output != void 0 &&
-              (typeof output === 'object' || typeof output === 'function')) {
+          if (Realm.wrap && !_wrap && output != void 0) {
             _wrap = true;
             try {
               output = new Proxy(output, handler);
@@ -76,7 +66,7 @@ class Realm {
         } catch(e) {
           throw e
         } finally {
-          Realm.active = Realm.wrap = Realm.fallback = true
+          Realm.active = Realm.wrap = Realm.fallback = Realm.boot = true
         }
       }])
     );
@@ -86,7 +76,7 @@ class Realm {
       try { delete globalThis[k] } catch(e) {}
     })
 
-    Object.setPrototypeOf(globalThis, new Proxy(snapshot, handler));
+    globalThis.__proto__ = new Proxy(snapshot, handler)
     Realm.ONE = true
   }
 }
