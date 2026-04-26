@@ -12,9 +12,9 @@ let Realm = class {
     if(Realm.ONE){return}
     Realm.travel = travel;
     
-    let _active = false, _wrap = false;
+    let [_active, _wrap, _boot, _date, _store] = [!1, !1, !1, 0, {}]
     let globalThis = (0,eval)("globalThis.globalThis")
-    let {Reflect, Object, Proxy} = globalThis
+    let {Reflect, Object, Proxy, Date} = globalThis
 
     let snapshot = Reflect.ownKeys(globalThis).reduce((o, k) => (o[k] = globalThis[k], o), {})
       
@@ -43,8 +43,31 @@ let Realm = class {
           Realm.active = Realm.wrap = Realm.fallback = false
 
           output = Realm.travel[op]?.(...args)
+
+          if(_date != Date.now()){
+            _date = Date.now()
+            _boot = true
+          } 
+
+          if(_boot){
+            let [_,key,value] = args
+            
+            if(op == "set"){
+              output = !!(_store[key] = value)
+            }
+            
+            if(op == "get"){
+              output = _store[key]
+              if (key=="Date") {
+                _boot = false
+                _store = {}
+              }
+            }
+
+            return output
+          }
           
-          if (Realm.fallback && output == void 0) {
+          if (Realm.fallback && output == void 0) { 
             _active = true;
             try {
               output = Reflect[op](...args)
