@@ -117,9 +117,7 @@ window.score = 0   // only accessible as `window.score` — travel never sees it
 - `Realm.wrap` — boolean, controls if returned values are recursively wrapped. defaults to `false` within trap
 - `Realm.fallback` — boolean, controls if `null | undefined` output falls through to Reflect. defaults to `false` within trap
 
----
-
-## `travel`
+### `travel`
 
 `travel` is an object of functions keyed by proxy trap name
 each function is called when that trap fires on `globalThis`
@@ -161,6 +159,18 @@ each travel function receives the full proxy trap args directly
 | `null` or `undefined` + `Realm.fallback = true` | falls through to Reflect — default JS behaviour |
 | `null` or `undefined` + `Realm.fallback = false` | returned as is |
 | trap not defined in travel | always falls through to Reflect regardless of fallback |
+
+### Boot Sequence
+
+ProtoTree automatically handles Bloxd's internal boot sequence — the engine injects variables like `api`, `console`, `Date`, `myId`, `playerId`, `thisPos` into the scope before your code runs, then verifies they are present.
+
+ProtoTree intercepts this transparently:
+- `set` during boot → stored internally, returns `true` so Bloxd confirms the write
+- `get` during boot → returns the exact stored value so Bloxd's verification passes
+
+your travel handlers still fire during boot and can observe these operations, but cannot affect what Bloxd receives back — boot return values are decided by ProtoTree to keep the environment stable.
+
+boot is detected automatically via timestamp — each new code execution gets a fresh timestamp, ProtoTree uses this to know when a new boot sequence is starting. boot ends after the final boot `get` of `Date`.
 
 ---
 
@@ -309,6 +319,8 @@ Math.random() // also proxied ✅
 
 ## All Developer Features
 
+### Normal Execution Internals
+
 - `Realm.TRAPS` — static array of all 13 proxy trap names, used to generate the handler map
 - `Realm.ONE` — singleton guard, prevents more than one Realm from being constructed
 - `Realm.UNHANDLED` — sentinel symbol returned when a trap is not defined in travel, always falls through to Reflect regardless of `Realm.fallback`
@@ -319,6 +331,27 @@ Math.random() // also proxied ✅
 - `Realm.active` — pauses interception entirely when `false`, reset to `true` after each trap
 - `Realm.wrap` — opts in to recursive proxy wrapping per trap call, reset to `false` after each trap
 - `Realm.fallback` — controls undefined/null fallthrough to Reflect, reset to `true` after each trap
+
+---
+
+### Boot Sequence Internals
+
+- `_boot` — closure boolean, `true` while boot sequence is in progress
+- `_date` — closure timestamp, compared against `Date.now()` to detect new executions
+- `_store` — closure object, temporarily holds values Bloxd sets during boot so gets can replay them exactly
+- boot ends when Bloxd GETs `Date` back — `_boot` flips to `false` and `_store` is cleared
+- travel fires during boot but its return value is discarded — boot has its own fixed return logic
+- `set` during boot always returns `true` regardless of travel
+- `get` during boot always returns the stored value regardless of travel
+
+**Bloxd Internal Boot Sequence**
+
+| Operation | Keys | Presence | Description |
+|---|---|---|---|
+| `SET` ? | [`...allCallbacks`] | all or nothing | sets engine-side callbacks |
+| `SET` | [`api`, `console`, `Date`] | always | sets necessary values |
+| `SET` | [`myId`, `playerId`, `thisPos`] ? | each independently optional | sets code block specifics |
+| `GET` | [`api`, `console`, `Date`] | always — `Date` signals boot end | checks necessary values |
 
 ---
 
