@@ -41,14 +41,16 @@ the only limits are fundamental JS syntax constraints — object literals, closu
 
 ### Proof
 
-i can use logic to prove that everything which was listed above iss proxyable, and that this tool can have complete control over
+i can use logic to prove that everything which could be proxied IS proxied, and that this tool can have complete control over
+```js
+//PENDING...
 
 - if it access `globalThis`
   - `globalThis` is hollowed out, has to access proxy
   - proxy can make a `returned proxy` version of a global
 - if it doesnt access `globalThis`, or a `returned proxy`
   - then proxy doesnt get activated, since it lives on `globalThis`
-
+```
 
 ---
 
