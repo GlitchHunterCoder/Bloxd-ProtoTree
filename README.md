@@ -41,7 +41,7 @@ the only limits are fundamental JS syntax constraints — object literals, closu
 
 ### Proof
 
-i can use logic to prove that everything which could be proxied IS proxied, and that this tool can have complete control over
+i can use logic to prove the following: **"everything which can possibly be proxied IS able to be proxied using this tool"**
 ```js
 //PENDING...
 
