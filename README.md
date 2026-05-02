@@ -1,8 +1,5 @@
 # Bloxd-ProtoTree
 
-> [!NOTE]
-> **Project Status: Complete** — ProtoTree has reached its final form. The core mechanic is fully realized and no new primitives will be added. Everything that can be built, is built on top of what exists here.
-
 ## Why it was made
 
 this project exists because i was exploring how prototype chains work in javascript
