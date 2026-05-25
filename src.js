@@ -24,13 +24,23 @@ let Realm = class {
     let handler = Object.fromEntries(
       Realm.TRAPS.map(op => [op, (...args) => {
         let output;
+        let err;
         try {
           Realm.active = Realm.wrap = Realm.fallback = false
-          output = Realm.travel[op]?.(...args)
+
+          try{
+            err = false
+            output = Realm.travel[op]?.(...args)
+          }catch(e){
+            err = true
+            output = e
+          }
+            
           if(_date != Date.now()){
             _date = Date.now()
             _boot = true
           };
+
           if(_boot){
             let [_,key,value] = args
             if(op == "set"){
@@ -45,23 +55,30 @@ let Realm = class {
             }
             return output
           };
-          if (Realm.fallback && output == void 0) { 
-            _active = true;
-            try {
-              output = Reflect[op](...args)
-            } finally {
-              _active = false;
-            }
-          };
-          if (Realm.wrap && !_wrap) {
-            _wrap = true;
-            try {
-              output = new Proxy(output, handler);
-            } finally {
-              _wrap = false;
-            }
-          };
-          return output;
+            
+          if(!err){
+            if (Realm.fallback && output == void 0) { 
+              _active = true;
+              try {
+                output = Reflect[op](...args)
+              } finally {
+                _active = false;
+              }
+            };
+              
+            if (Realm.wrap && !_wrap) {
+              _wrap = true;
+              try {
+                output = new Proxy(output, handler);
+              } finally {
+                _wrap = false;
+              }
+            };
+
+            return output;
+          }else{
+            throw output
+          }
         } finally {
           Realm.active = Realm.wrap = Realm.fallback = true
         }
@@ -87,4 +104,3 @@ let Realm = class {
     Realm.active = true
   }
 }
-
