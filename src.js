@@ -89,19 +89,16 @@ let Realm = class {
         return (!Realm.active || _active) ? undefined : handler[prop]
       }
     });
-      
-    ["String","Number","Boolean","RegExp","Function"].forEach(key => {
+    /*["Array","Object","String","Number","Boolean","RegExp","Function"].forEach(key => {
         Reflect.setPrototypeOf(globalThis[key].prototype, new Proxy(snapshot(globalThis[key].prototype), HANDLE))
-        Reflect.ownKeys(globalThis[key].prototype).forEach(k => {
+        Reflect.ownKeys(globalThis[key].prototype).filter(k=>key === "Array" && k !== "push").forEach(k => {
         try { Reflect.deleteProperty(globalThis[key].prototype, k) } catch(e) {}
         })
-    });
-
+    });*/
     Reflect.setPrototypeOf(globalThis, new Proxy(snapshot(globalThis), HANDLE))
     Reflect.ownKeys(globalThis).filter(k=>k !== "globalThis").forEach(k => {
       try { Reflect.deleteProperty(globalThis, k) } catch(e) {}
     });
-      
     Realm.ONE = true
     _active = false
     Realm.active = true
